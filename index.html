@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Télésouffleur Webcam Pro</title>
+    <!-- Chargement de Tailwind CSS pour un style moderne et responsif -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Configuration de la police Inter */
+        html { font-family: 'Inter', sans-serif; }
+        
+        /* Styles de base pour le corps */
+        body {
+            /* On laisse la barre de défilement pour les contrôles, mais on s'assure que le contenu est centré */
+            background-color: #f3f4f6; /* Gris clair */
+            /* TRÈS PETIT ESPACE RÉSERVÉ pour le télésouffleur fixe (6% de la hauteur de vue) */
+            padding-top: 6vh; 
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        /* Conteneur principal du télésouffleur (la bande noire en haut) */
+        #teleprompter-container {
+            position: fixed; 
+            top: 0; /* Aligné tout en haut, juste sous la webcam du laptop */
+            left: 0;
+            width: 100%;
+            /* TRÈS PETITE HAUTEUR pour être discret */
+            height: 6vh; 
+            background-color: rgba(0, 0, 0, 0.95); /* Noir opaque */
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            overflow: hidden; /* Cache le texte qui sort du cadre */
+            z-index: 50; /* Au-dessus de tout le reste */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Style du texte qui défile */
+        #scrolling-text {
+            white-space: pre-wrap; /* Maintient les sauts de ligne */
+            text-align: center;
+            /* GRANDE TAILLE de police pour maximiser la lisibilité dans la petite bande */
+            font-size: 52px; 
+            line-height: 1.1; /* Réduit l'espace entre les lignes pour gagner de la place */
+            padding: 0 5%;
+            width: 90%;
+            /* Positionnement par JavaScript */
+            position: absolute;
+            top: 100%; /* Commence en bas du conteneur */
+        }
+        
+        /* Classe pour le mode miroir/inversé */
+        .mirrored {
+            transform: scaleX(-1); /* Inverse le texte horizontalement */
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <!-- Conteneur du Télésouffleur (fixe en haut) -->
+    <div id="teleprompter-container">
+        <div id="scrolling-text">Collez votre script ci-dessous et cliquez sur Démarrer.</div>
+    </div>
+
+    <!-- Contrôles et zone de saisie (le reste de l'écran) -->
+    <div id="controls" class="p-4 md:p-8 max-w-4xl mx-auto">
+        <div class="bg-white p-6 md:p-8 rounded-xl shadow-lg border border-gray-200">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">Contrôles du Télésouffleur</h2>
+
+            <textarea id="script-input" class="w-full h-40 p-4 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 mb-6 text-base" 
+                      placeholder="Collez votre script ici... Chaque saut de ligne sera conservé."></textarea>
+            
+            <div class="flex flex-wrap gap-3 mb-6 items-center">
+                <!-- Boutons de contrôle -->
+                <button id="start-button" class="flex-1 min-w-[120px] bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-150 ease-in-out">
+                    ▶️ Démarrer
+                </button>
+                <button id="stop-button" disabled class="flex-1 min-w-[120px] bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-150 ease-in-out disabled:opacity-50">
+                    ⏸️ Arrêter
+                </button>
+                <button id="reset-button" class="flex-1 min-w-[120px] bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-150 ease-in-out">
+                    ↩️ Réinitialiser
+                </button>
+            </div>
+
+            <!-- Contrôles de vitesse et miroir -->
+            <div class="flex flex-col space-y-4 md:flex-row md:justify-between md:items-center">
+                
+                <!-- Contrôle de vitesse -->
+                <div class="speed-control flex-1 mr-4">
+                    <label for="speed-range" class="block text-sm font-medium text-gray-700 mb-1">Vitesse de Défilement: <span id="speed-value" class="font-bold text-blue-600">50</span></label>
+                    <input type="range" id="speed-range" min="10" max="150" value="50" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg">
+                </div>
+
+                <!-- Option Miroir -->
+                <div class="flex items-center">
+                    <input type="checkbox" id="mirror-mode" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <label for="mirror-mode" class="ml-2 block text-sm font-medium text-gray-700">Mode Miroir (pour réflecteur)</label>
+                </div>
+            </div>
+            
+            <div id="message-box" class="mt-4 p-3 hidden bg-green-100 text-green-700 rounded-lg"></div>
+
+        </div>
+    </div>
+
+    <script>
+        const scriptInput = document.getElementById('script-input');
+        const scrollingText = document.getElementById('scrolling-text');
+        const startButton = document.getElementById('start-button');
+        const stopButton = document.getElementById('stop-button');
+        const resetButton = document.getElementById('reset-button');
+        const speedRange = document.getElementById('speed-range');
+        const speedValueSpan = document.getElementById('speed-value');
+        const mirrorCheckbox = document.getElementById('mirror-mode');
+        const messageBox = document.getElementById('message-box');
+
+        let isScrolling = false;
+        let animationFrameId = null;
+        let startTime = null;
+        let scrollSpeed = 50; // Vitesse initiale (10-150)
+        let textHeight = 0;
+        let containerHeight = 0;
+
+        /** Affiche un message temporaire à l'utilisateur. */
+        function showMessage(text, isError = false) {
+            messageBox.textContent = text;
+            messageBox.className = 'mt-4 p-3 rounded-lg block ' + (isError ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700');
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 3000);
+        }
+
+        /**
+         * Met à jour le contenu du télésouffleur et recalcule la hauteur.
+         */
+        function updateText() {
+            scrollingText.textContent = scriptInput.value || "Collez votre script ci-dessous et cliquez sur Démarrer.";
+            // Mesure la hauteur après le rendu pour un calcul précis
+            scrollingText.style.transform = 'translateY(0)';
+            
+            // Attendre le prochain cycle d'animation pour s'assurer que le rendu est fait avant de mesurer
+            requestAnimationFrame(() => {
+                textHeight = scrollingText.scrollHeight;
+                containerHeight = document.getElementById('teleprompter-container').clientHeight;
+                // Remet le texte en bas prêt à défiler
+                scrollingText.style.transform = 'translateY(100%)';
+            });
+        }
+
+        /**
+         * Fonction principale de défilement (utilisant requestAnimationFrame).
+         */
+        function scroll(timestamp) {
+            if (!startTime) {
+                startTime = timestamp;
+            }
+
+            const elapsedTime = timestamp - startTime;
+            
+            // La vitesse est proportionnelle au temps écoulé et au réglage utilisateur (scrollSpeed)
+            // Plus scrollSpeed est grand, plus le déplacement est rapide.
+            // On utilise 2000 comme diviseur pour un défilement par seconde à une vitesse de 50.
+            const distanceInPixels = elapsedTime * (scrollSpeed / 2000) * 3; 
+
+            // La distance totale à parcourir est la hauteur du texte + la hauteur du conteneur
+            const totalTravel = textHeight + containerHeight;
+            
+            // Calculer la position actuelle de Y en pourcentage du conteneur
+            // Commence à 100% (bas) et se termine à une valeur négative (haut)
+            const displacementPercent = (distanceInPixels / totalTravel) * 100;
+            const startPosition = containerHeight / totalTravel * 100; // Position de départ si on était en pourcentage (généralement autour de 100%)
+
+            let translateY = startPosition - displacementPercent;
+
+            // Gérer la fin du défilement (quand la distance parcourue atteint la distance totale)
+            if (distanceInPixels >= totalTravel) {
+                translateY = - (textHeight / containerHeight) * 100; // Position finale tout en haut
+                stopScrolling();
+                showMessage("Défilement terminé !");
+                return;
+            }
+
+            // Applique la transformation, en conservant le miroir si actif
+            let transformStyle = `translateY(${translateY}%)`;
+            if (mirrorCheckbox.checked) {
+                transformStyle += ' scaleX(-1)';
+            }
+            scrollingText.style.transform = transformStyle;
+
+            if (isScrolling) {
+                animationFrameId = requestAnimationFrame(scroll);
+            }
+        }
+        
+        /** Démarre le défilement. */
+        function startScrolling() {
+            if (isScrolling) return;
+            if (!scriptInput.value) {
+                showMessage("Veuillez entrer votre script avant de démarrer.", true);
+                return;
+            }
+
+            updateText(); 
+            isScrolling = true;
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            resetButton.disabled = false;
+
+            // Réinitialise la position de départ (bas du conteneur)
+            scrollingText.style.transform = mirrorCheckbox.checked ? 'translateY(100%) scaleX(-1)' : 'translateY(100%)';
+            
+            startTime = null; // Réinitialise le temps pour un nouveau départ
+            animationFrameId = requestAnimationFrame(scroll);
+            showMessage("Défilement démarré.");
+        }
+
+        /** Arrête le défilement. */
+        function stopScrolling() {
+            if (!isScrolling) return;
+
+            isScrolling = false;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            showMessage("Défilement mis en pause.");
+        }
+
+        /** Réinitialise le télésouffleur à sa position de départ. */
+        function resetScrolling() {
+            stopScrolling();
+            scrollingText.style.transform = mirrorCheckbox.checked ? 'translateY(100%) scaleX(-1)' : 'translateY(100%)';
+            startTime = null;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            showMessage("Position réinitialisée.");
+        }
+
+        // --- Écouteurs d'événements ---
+
+        startButton.addEventListener('click', startScrolling);
+        stopButton.addEventListener('click', stopScrolling);
+        resetButton.addEventListener('click', resetScrolling);
+        scriptInput.addEventListener('input', updateText); // Met à jour le texte affiché quand on tape
+
+        // Mise à jour de la vitesse
+        speedRange.addEventListener('input', (e) => {
+            scrollSpeed = parseInt(e.target.value);
+            speedValueSpan.textContent = scrollSpeed;
+        });
+
+        // Activation du mode miroir
+        mirrorCheckbox.addEventListener('change', () => {
+            // Applique ou retire la classe miroir au texte
+            scrollingText.classList.toggle('mirrored', mirrorCheckbox.checked);
+            
+            // Si le défilement est actif, on doit le relancer pour réappliquer la transformation complète (translate + scale)
+            if (isScrolling) {
+                stopScrolling();
+                startScrolling();
+            } else {
+                // Si à l'arrêt, s'assurer que la réinitialisation prend en compte le miroir
+                resetScrolling();
+            }
+            showMessage(`Mode Miroir : ${mirrorCheckbox.checked ? 'Activé' : 'Désactivé'}`);
+        });
+
+        // Mise à jour de la hauteur en cas de redimensionnement de la fenêtre
+        window.addEventListener('resize', updateText);
+
+        // Initialisation
+        updateText();
+    </script>
+</body>
+</html>
