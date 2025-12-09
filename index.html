@@ -14,8 +14,7 @@
         body {
             /* On laisse la barre de défilement pour les contrôles, mais on s'assure que le contenu est centré */
             background-color: #f3f4f6; /* Gris clair */
-            /* TRÈS PETIT ESPACE RÉSERVÉ pour le télésouffleur fixe (6% de la hauteur de vue) */
-            padding-top: 6vh; 
+            /* padding-top sera défini dynamiquement par JS en fonction de la hauteur de la bande (teleprompter-height) */
             margin: 0;
             min-height: 100vh;
         }
@@ -26,8 +25,7 @@
             top: 0; /* Aligné tout en haut, juste sous la webcam du laptop */
             left: 0;
             width: 100%;
-            /* TRÈS PETITE HAUTEUR pour être discret */
-            height: 6vh; 
+            /* Hauteur (height) sera définie dynamiquement par JS */
             background-color: rgba(0, 0, 0, 0.95); /* Noir opaque */
             color: white;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -42,12 +40,16 @@
         #scrolling-text {
             white-space: pre-wrap; /* Maintient les sauts de ligne */
             text-align: center;
-            /* GRANDE TAILLE de police pour maximiser la lisibilité dans la petite bande */
-            font-size: 52px; 
+            /* La taille de police (font-size) sera définie dynamiquement par JS */
             line-height: 1.1; /* Réduit l'espace entre les lignes pour gagner de la place */
             padding: 0 5%;
-            width: 90%;
-            /* Positionnement par JavaScript */
+            /* Limite la largeur au centre de l'écran pour éviter les mouvements de tête */
+            max-width: 700px;
+            
+            /* Pour centrer l'élément positionné absolument */
+            left: 50%;
+            
+            /* Positionnement par JavaScript (transform sera géré par JS) */
             position: absolute;
             top: 100%; /* Commence en bas du conteneur */
         }
@@ -62,7 +64,7 @@
 
     <!-- Conteneur du Télésouffleur (fixe en haut) -->
     <div id="teleprompter-container">
-        <div id="scrolling-text">Collez votre script ci-dessous et cliquez sur Démarrer.</div>
+        <div id="scrolling-text">Collez votre script ci-dessous et ajustez les réglages.</div>
     </div>
 
     <!-- Contrôles et zone de saisie (le reste de l'écran) -->
@@ -86,13 +88,25 @@
                 </button>
             </div>
 
-            <!-- Contrôles de vitesse et miroir -->
-            <div class="flex flex-col space-y-4 md:flex-row md:justify-between md:items-center">
+            <!-- Contrôles de vitesse, miroir, taille, et hauteur -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
                 
                 <!-- Contrôle de vitesse -->
-                <div class="speed-control flex-1 mr-4">
+                <div class="speed-control">
                     <label for="speed-range" class="block text-sm font-medium text-gray-700 mb-1">Vitesse de Défilement: <span id="speed-value" class="font-bold text-blue-600">50</span></label>
                     <input type="range" id="speed-range" min="10" max="150" value="50" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg">
+                </div>
+
+                <!-- Contrôle de la Taille de la Police -->
+                <div class="font-size-control">
+                    <label for="font-size-range" class="block text-sm font-medium text-gray-700 mb-1">Taille du Texte (px): <span id="font-size-value" class="font-bold text-blue-600">52</span></label>
+                    <input type="range" id="font-size-range" min="20" max="100" value="52" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg">
+                </div>
+                
+                <!-- Contrôle de la Hauteur de la Bande -->
+                <div class="height-control">
+                    <label for="height-range" class="block text-sm font-medium text-gray-700 mb-1">Hauteur de la Zone d'Affichage (vh): <span id="height-value" class="font-bold text-blue-600">6</span></label>
+                    <input type="range" id="height-range" min="3" max="20" value="6" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg">
                 </div>
 
                 <!-- Option Miroir -->
@@ -110,20 +124,33 @@
     <script>
         const scriptInput = document.getElementById('script-input');
         const scrollingText = document.getElementById('scrolling-text');
+        const teleprompterContainer = document.getElementById('teleprompter-container');
         const startButton = document.getElementById('start-button');
         const stopButton = document.getElementById('stop-button');
         const resetButton = document.getElementById('reset-button');
+        
+        // Contrôles existants
         const speedRange = document.getElementById('speed-range');
         const speedValueSpan = document.getElementById('speed-value');
         const mirrorCheckbox = document.getElementById('mirror-mode');
+        
+        // Nouveaux contrôles
+        const fontSizeRange = document.getElementById('font-size-range');
+        const fontSizeValueSpan = document.getElementById('font-size-value');
+        const heightRange = document.getElementById('height-range');
+        const heightValueSpan = document.getElementById('height-value');
+        
         const messageBox = document.getElementById('message-box');
+        const body = document.body;
 
         let isScrolling = false;
         let animationFrameId = null;
         let startTime = null;
-        let scrollSpeed = 50; // Vitesse initiale (10-150)
+        let scrollSpeed = 50; 
+        let fontSize = 52;
+        let containerHeightVh = 6; // En vh (valeur initiale)
         let textHeight = 0;
-        let containerHeight = 0;
+        let containerHeightPx = 0;
 
         /** Affiche un message temporaire à l'utilisateur. */
         function showMessage(text, isError = false) {
@@ -135,19 +162,42 @@
         }
 
         /**
-         * Met à jour le contenu du télésouffleur et recalcule la hauteur.
+         * Applique les styles dynamiques (taille de police et hauteur de bande).
          */
-        function updateText() {
-            scrollingText.textContent = scriptInput.value || "Collez votre script ci-dessous et cliquez sur Démarrer.";
-            // Mesure la hauteur après le rendu pour un calcul précis
-            scrollingText.style.transform = 'translateY(0)';
+        function applyStyles() {
+            // Applique la taille de police
+            scrollingText.style.fontSize = `${fontSize}px`;
+
+            // Applique la hauteur de la bande et ajuste le padding du corps
+            teleprompterContainer.style.height = `${containerHeightVh}vh`;
+            body.style.paddingTop = `${containerHeightVh}vh`;
+            
+            // Recalcule la hauteur du texte et du conteneur après le changement de style
+            updateText(false);
+        }
+
+        /**
+         * Met à jour le contenu du télésouffleur et recalcule la hauteur.
+         * @param {boolean} resetPosition - Indique s'il faut remettre le texte en position de départ.
+         */
+        function updateText(resetPosition = true) {
+            scrollingText.textContent = scriptInput.value || "Collez votre script ci-dessous et ajustez les réglages.";
+            
+            if (resetPosition) {
+                // Mesure la hauteur après le rendu pour un calcul précis
+                // On ajoute le décalage horizontal pour s'assurer que le calcul de la hauteur est fait
+                scrollingText.style.transform = 'translateY(0%) translateX(-50%)'; 
+            }
             
             // Attendre le prochain cycle d'animation pour s'assurer que le rendu est fait avant de mesurer
             requestAnimationFrame(() => {
                 textHeight = scrollingText.scrollHeight;
-                containerHeight = document.getElementById('teleprompter-container').clientHeight;
-                // Remet le texte en bas prêt à défiler
-                scrollingText.style.transform = 'translateY(100%)';
+                containerHeightPx = teleprompterContainer.clientHeight;
+                
+                if (resetPosition) {
+                    // Remet le texte en bas prêt à défiler
+                    scrollingText.style.transform = mirrorCheckbox.checked ? 'translateY(100%) translateX(-50%) scaleX(-1)' : 'translateY(100%) translateX(-50%)';
+                }
             });
         }
 
@@ -162,30 +212,27 @@
             const elapsedTime = timestamp - startTime;
             
             // La vitesse est proportionnelle au temps écoulé et au réglage utilisateur (scrollSpeed)
-            // Plus scrollSpeed est grand, plus le déplacement est rapide.
-            // On utilise 2000 comme diviseur pour un défilement par seconde à une vitesse de 50.
             const distanceInPixels = elapsedTime * (scrollSpeed / 2000) * 3; 
 
             // La distance totale à parcourir est la hauteur du texte + la hauteur du conteneur
-            const totalTravel = textHeight + containerHeight;
+            const totalTravel = textHeight + containerHeightPx;
             
             // Calculer la position actuelle de Y en pourcentage du conteneur
-            // Commence à 100% (bas) et se termine à une valeur négative (haut)
             const displacementPercent = (distanceInPixels / totalTravel) * 100;
-            const startPosition = containerHeight / totalTravel * 100; // Position de départ si on était en pourcentage (généralement autour de 100%)
+            const startPosition = containerHeightPx / totalTravel * 100;
 
             let translateY = startPosition - displacementPercent;
 
-            // Gérer la fin du défilement (quand la distance parcourue atteint la distance totale)
+            // Gérer la fin du défilement
             if (distanceInPixels >= totalTravel) {
-                translateY = - (textHeight / containerHeight) * 100; // Position finale tout en haut
+                translateY = - (textHeight / containerHeightPx) * 100; // Position finale tout en haut
                 stopScrolling();
                 showMessage("Défilement terminé !");
                 return;
             }
 
-            // Applique la transformation, en conservant le miroir si actif
-            let transformStyle = `translateY(${translateY}%)`;
+            // Applique la transformation, en conservant le centrage horizontal et le miroir si actif
+            let transformStyle = `translateY(${translateY}%) translateX(-50%)`; // Centrage horizontal inclus
             if (mirrorCheckbox.checked) {
                 transformStyle += ' scaleX(-1)';
             }
@@ -204,14 +251,17 @@
                 return;
             }
 
+            // Assure que les styles sont appliqués et les hauteurs recalculées avant de démarrer
+            applyStyles(); 
             updateText(); 
+
             isScrolling = true;
             startButton.disabled = true;
             stopButton.disabled = false;
             resetButton.disabled = false;
 
             // Réinitialise la position de départ (bas du conteneur)
-            scrollingText.style.transform = mirrorCheckbox.checked ? 'translateY(100%) scaleX(-1)' : 'translateY(100%)';
+            scrollingText.style.transform = mirrorCheckbox.checked ? 'translateY(100%) translateX(-50%) scaleX(-1)' : 'translateY(100%) translateX(-50%)';
             
             startTime = null; // Réinitialise le temps pour un nouveau départ
             animationFrameId = requestAnimationFrame(scroll);
@@ -236,7 +286,8 @@
         /** Réinitialise le télésouffleur à sa position de départ. */
         function resetScrolling() {
             stopScrolling();
-            scrollingText.style.transform = mirrorCheckbox.checked ? 'translateY(100%) scaleX(-1)' : 'translateY(100%)';
+            // Réinitialise la position avec le centrage horizontal
+            scrollingText.style.transform = mirrorCheckbox.checked ? 'translateY(100%) translateX(-50%) scaleX(-1)' : 'translateY(100%) translateX(-50%)';
             startTime = null;
             startButton.disabled = false;
             stopButton.disabled = true;
@@ -248,13 +299,28 @@
         startButton.addEventListener('click', startScrolling);
         stopButton.addEventListener('click', stopScrolling);
         resetButton.addEventListener('click', resetScrolling);
-        scriptInput.addEventListener('input', updateText); // Met à jour le texte affiché quand on tape
+        scriptInput.addEventListener('input', updateText); 
 
         // Mise à jour de la vitesse
         speedRange.addEventListener('input', (e) => {
             scrollSpeed = parseInt(e.target.value);
             speedValueSpan.textContent = scrollSpeed;
         });
+        
+        // Mise à jour de la taille de police
+        fontSizeRange.addEventListener('input', (e) => {
+            fontSize = parseInt(e.target.value);
+            fontSizeValueSpan.textContent = fontSize;
+            applyStyles(); // Applique le style et recalcule la hauteur
+        });
+
+        // Mise à jour de la hauteur de la bande
+        heightRange.addEventListener('input', (e) => {
+            containerHeightVh = parseInt(e.target.value);
+            heightValueSpan.textContent = containerHeightVh;
+            applyStyles(); // Applique le style et recalcule la hauteur
+        });
+
 
         // Activation du mode miroir
         mirrorCheckbox.addEventListener('change', () => {
@@ -273,10 +339,10 @@
         });
 
         // Mise à jour de la hauteur en cas de redimensionnement de la fenêtre
-        window.addEventListener('resize', updateText);
+        window.addEventListener('resize', applyStyles);
 
         // Initialisation
-        updateText();
+        applyStyles();
     </script>
 </body>
 </html>
